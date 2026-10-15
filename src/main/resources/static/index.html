@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roster — Employee Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- Three.js for background effect -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+
+<body>
+
+  <canvas id="bg-canvas"></canvas>
+
+  <div class="app-shell">
+
+    <!-- ============ Top Navigation ============ -->
+    <nav class="top-nav" id="topNav">
+      <div class="brand">
+        <span class="brand-mark">NG</span>
+        <span class="brand-name">NexGen</span>
+      </div>
+      <div class="nav-links">
+        <button class="nav-item is-active" data-view="employees">Overview</button>
+        <button class="nav-item" data-view="departments">Departments</button>
+      </div>
+      <div class="nav-actions">
+        <button class="btn btn-outline" id="addBtn">+ New Employee</button>
+        <button class="btn btn-outline" id="addDeptBtn" style="display: none;">+ New Department</button>
+        <div class="user-profile" id="userProfileBtn" title="Settings">
+          <img src="https://ui-avatars.com/api/?name=Admin&background=random" alt="User">
+        </div>
+      </div>
+    </nav>
+
+    <!-- ============ Main ============ -->
+    <div class="main-content">
+      <!-- ============ Employees View ============ -->
+      <section class="view" id="view-employees">
+
+        <!-- Dashboard Top Cards -->
+        <div class="dashboard-grid">
+          <div class="glass-card welcome-card">
+            <h1>Employee <br /> Overview</h1>
+            <p class="subtitle">Company wide roster</p>
+            <div class="card-footer">
+              <span>Manage talent</span>
+              <span class="arrow">&rarr;</span>
+            </div>
+          </div>
+
+          <div class="glass-card stat-card center-content">
+            <div class="progress-ring-container">
+              <svg class="progress-ring" width="160" height="160">
+                <circle class="progress-ring__bg" stroke="rgba(255,255,255,0.1)" stroke-width="12" fill="transparent"
+                  r="70" cx="80" cy="80" />
+                <circle class="progress-ring__circle" stroke="#a8f0b7" stroke-width="12" stroke-dasharray="440"
+                  stroke-dashoffset="100" fill="transparent" r="70" cx="80" cy="80" />
+              </svg>
+              <div class="progress-text">
+                <span class="label">Active</span>
+                <h2 id="statActive">0</h2>
+                <span class="subtext" id="statTotalSub">Total: 0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-card image-card">
+            <!-- decorative image mimicking the reference -->
+            <div class="image-overlay"></div>
+          </div>
+        </div>
+
+        <!-- Toolbar & Data Section -->
+        <div class="data-section">
+          <div class="section-header">
+            <h2 class="section-title">Employees</h2>
+            <div class="toolbar">
+              <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search name or title…" />
+              </div>
+              <select id="filterDepartment" class="select-input">
+                <option value="">All departments</option>
+              </select>
+              <select id="filterStatus" class="select-input">
+                <option value="">All statuses</option>
+                <option value="ACTIVE">Active</option>
+                <option value="ON_LEAVE">On leave</option>
+                <option value="TERMINATED">Terminated</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="table-card glass-card">
+            <div class="table-scroll">
+              <table class="data-table" id="employeeTable">
+                <thead>
+                  <tr>
+                    <th data-sort="firstName">Name</th>
+                    <th data-sort="jobTitle">Title</th>
+                    <th class="hide-sm">Department</th>
+                    <th class="hide-sm">Email</th>
+                    <th data-sort="salary">Salary</th>
+                    <th data-sort="hireDate" class="hide-sm">Hired</th>
+                    <th>Status</th>
+                    <th class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="employeeTableBody">
+                  <!-- rows injected by JS -->
+                </tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="emptyState" hidden>
+              <p>No employees match your filters.</p>
+              <button class="btn btn-ghost" id="clearFiltersBtn">Clear filters</button>
+            </div>
+          </div>
+
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </section>
+
+      <!-- ============ Departments View ============ -->
+      <section class="view" id="view-departments" style="display: none;">
+        <div class="data-section">
+          <div class="section-header">
+            <h2 class="section-title">Departments</h2>
+          </div>
+          <div class="dept-grid" id="deptGrid">
+            <!-- department cards injected by JS -->
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ============ Employee Modal ============ -->
+  <div class="modal-overlay" id="employeeModalOverlay" hidden>
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h2 id="employeeModalTitle">Add Employee</h2>
+        <button class="modal-close" id="closeEmployeeModal">&times;</button>
+      </div>
+      <form id="employeeForm" novalidate>
+        <input type="hidden" id="employeeId" />
+
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="firstName">First name</label>
+            <input type="text" id="firstName" required />
+            <span class="field-error" id="err-firstName"></span>
+          </div>
+          <div class="form-field">
+            <label for="lastName">Last name</label>
+            <input type="text" id="lastName" required />
+            <span class="field-error" id="err-lastName"></span>
+          </div>
+          <div class="form-field span-2">
+            <label for="email">Email</label>
+            <input type="email" id="email" required />
+            <span class="field-error" id="err-email"></span>
+          </div>
+          <div class="form-field">
+            <label for="phone">Phone</label>
+            <input type="text" id="phone" placeholder="+91-9876543210" />
+            <span class="field-error" id="err-phone"></span>
+          </div>
+          <div class="form-field">
+            <label for="jobTitle">Job title</label>
+            <input type="text" id="jobTitle" required />
+            <span class="field-error" id="err-jobTitle"></span>
+          </div>
+          <div class="form-field">
+            <label for="salary">Salary (annual)</label>
+            <input type="number" id="salary" min="0" step="1000" required />
+            <span class="field-error" id="err-salary"></span>
+          </div>
+          <div class="form-field">
+            <label for="hireDate">Hire date</label>
+            <input type="date" id="hireDate" required />
+            <span class="field-error" id="err-hireDate"></span>
+          </div>
+          <div class="form-field">
+            <label for="department">Department</label>
+            <select id="department">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="ACTIVE">Active</option>
+              <option value="ON_LEAVE">On leave</option>
+              <option value="TERMINATED">Terminated</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="cancelEmployeeBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveEmployeeBtn">Save employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ Department Modal ============ -->
+  <div class="modal-overlay" id="deptModalOverlay" hidden>
+    <div class="modal modal-small glass-card">
+      <div class="modal-header">
+        <h2 id="deptModalTitle">Add Department</h2>
+        <button class="modal-close" id="closeDeptModal">&times;</button>
+      </div>
+      <form id="deptForm" novalidate>
+        <input type="hidden" id="deptId" />
+        <div class="form-field">
+          <label for="deptName">Department name</label>
+          <input type="text" id="deptName" required />
+          <span class="field-error" id="err-deptName"></span>
+        </div>
+        <div class="form-field">
+          <label for="deptDescription">Description</label>
+          <textarea id="deptDescription" rows="3"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="cancelDeptBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save department</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ Confirm Dialog ============ -->
+  <div class="modal-overlay" id="confirmOverlay" hidden>
+    <div class="modal modal-tiny glass-card">
+      <p id="confirmMessage">Are you sure?</p>
+      <div class="form-actions" style="justify-content: center; margin-top: 20px;">
+        <button class="btn btn-ghost" id="confirmCancelBtn">Cancel</button>
+        <button class="btn btn-danger" id="confirmOkBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Settings Modal ============ -->
+  <div class="modal-overlay" id="settingsModalOverlay" hidden>
+    <div class="modal modal-small glass-card">
+      <div class="modal-header">
+        <h2 id="settingsModalTitle">Settings</h2>
+        <button class="modal-close" id="closeSettingsModal">&times;</button>
+      </div>
+      <form id="settingsForm" novalidate>
+        <div class="form-field">
+          <label for="settingCompanyName">Company Name</label>
+          <input type="text" id="settingCompanyName" required />
+        </div>
+        <div class="form-field">
+          <label for="settingLogoUrl">Company Logo URL (leave blank for default)</label>
+          <input type="text" id="settingLogoUrl" placeholder="../images/nexgen-logo.png" />
+        </div>
+        <div class="form-field">
+          <label for="settingTheme">Theme</label>
+          <select id="settingTheme">
+            <option value="default">Default Teal</option>
+            <option value="dark">Midnight Dark</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="cancelSettingsBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ Toast ============ -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>

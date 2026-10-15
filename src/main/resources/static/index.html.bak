@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Roster — Employee Management</title>
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">R</span>
+      <span class="brand-name">Roster</span>
+    </div>
+    <nav class="nav">
+      <button class="nav-item is-active" data-view="employees">
+        <span class="nav-icon">&#9670;</span> Employees
+      </button>
+      <button class="nav-item" data-view="departments">
+        <span class="nav-icon">&#9635;</span> Departments
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="stat-block">
+        <span class="stat-num" id="statTotal">—</span>
+        <span class="stat-label">Total employees</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <div class="main">
+
+    <header class="topbar">
+      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">&#9776;</button>
+      <h1 class="view-title" id="viewTitle">Employees</h1>
+      <button class="btn btn-primary" id="addBtn">+ Add Employee</button>
+    </header>
+
+    <!-- ============ Employees View ============ -->
+    <section class="view" id="view-employees">
+
+      <div class="toolbar">
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="Search by name, email, or title…" />
+        </div>
+        <select id="filterDepartment" class="select-input">
+          <option value="">All departments</option>
+        </select>
+        <select id="filterStatus" class="select-input">
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="ON_LEAVE">On leave</option>
+          <option value="TERMINATED">Terminated</option>
+        </select>
+      </div>
+
+      <div class="table-card">
+        <div class="table-scroll">
+          <table class="data-table" id="employeeTable">
+            <thead>
+              <tr>
+                <th data-sort="firstName">Name</th>
+                <th data-sort="jobTitle">Title</th>
+                <th class="hide-sm">Department</th>
+                <th class="hide-sm">Email</th>
+                <th data-sort="salary">Salary</th>
+                <th data-sort="hireDate" class="hide-sm">Hired</th>
+                <th>Status</th>
+                <th class="col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="employeeTableBody">
+              <!-- rows injected by JS -->
+            </tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="emptyState" hidden>
+          <p>No employees match your filters.</p>
+          <button class="btn btn-ghost" id="clearFiltersBtn">Clear filters</button>
+        </div>
+      </div>
+
+      <div class="pagination" id="pagination"></div>
+    </section>
+
+    <!-- ============ Departments View ============ -->
+    <section class="view" id="view-departments" hidden>
+      <div class="toolbar">
+        <button class="btn btn-primary" id="addDeptBtn">+ Add Department</button>
+      </div>
+      <div class="dept-grid" id="deptGrid">
+        <!-- department cards injected by JS -->
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- ============ Employee Modal ============ -->
+<div class="modal-overlay" id="employeeModalOverlay" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="employeeModalTitle">Add Employee</h2>
+      <button class="modal-close" id="closeEmployeeModal">&times;</button>
+    </div>
+    <form id="employeeForm" novalidate>
+      <input type="hidden" id="employeeId" />
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="firstName">First name</label>
+          <input type="text" id="firstName" required />
+          <span class="field-error" id="err-firstName"></span>
+        </div>
+        <div class="form-field">
+          <label for="lastName">Last name</label>
+          <input type="text" id="lastName" required />
+          <span class="field-error" id="err-lastName"></span>
+        </div>
+        <div class="form-field span-2">
+          <label for="email">Email</label>
+          <input type="email" id="email" required />
+          <span class="field-error" id="err-email"></span>
+        </div>
+        <div class="form-field">
+          <label for="phone">Phone</label>
+          <input type="text" id="phone" placeholder="+91-9876543210" />
+          <span class="field-error" id="err-phone"></span>
+        </div>
+        <div class="form-field">
+          <label for="jobTitle">Job title</label>
+          <input type="text" id="jobTitle" required />
+          <span class="field-error" id="err-jobTitle"></span>
+        </div>
+        <div class="form-field">
+          <label for="salary">Salary (annual)</label>
+          <input type="number" id="salary" min="0" step="1000" required />
+          <span class="field-error" id="err-salary"></span>
+        </div>
+        <div class="form-field">
+          <label for="hireDate">Hire date</label>
+          <input type="date" id="hireDate" required />
+          <span class="field-error" id="err-hireDate"></span>
+        </div>
+        <div class="form-field">
+          <label for="department">Department</label>
+          <select id="department">
+            <option value="">Unassigned</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="status">Status</label>
+          <select id="status">
+            <option value="ACTIVE">Active</option>
+            <option value="ON_LEAVE">On leave</option>
+            <option value="TERMINATED">Terminated</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="cancelEmployeeBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="saveEmployeeBtn">Save employee</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ Department Modal ============ -->
+<div class="modal-overlay" id="deptModalOverlay" hidden>
+  <div class="modal modal-small">
+    <div class="modal-header">
+      <h2 id="deptModalTitle">Add Department</h2>
+      <button class="modal-close" id="closeDeptModal">&times;</button>
+    </div>
+    <form id="deptForm" novalidate>
+      <input type="hidden" id="deptId" />
+      <div class="form-field">
+        <label for="deptName">Department name</label>
+        <input type="text" id="deptName" required />
+        <span class="field-error" id="err-deptName"></span>
+      </div>
+      <div class="form-field">
+        <label for="deptDescription">Description</label>
+        <textarea id="deptDescription" rows="3"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="cancelDeptBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save department</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ Confirm Dialog ============ -->
+<div class="modal-overlay" id="confirmOverlay" hidden>
+  <div class="modal modal-tiny">
+    <p id="confirmMessage">Are you sure?</p>
+    <div class="form-actions">
+      <button class="btn btn-ghost" id="confirmCancelBtn">Cancel</button>
+      <button class="btn btn-danger" id="confirmOkBtn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Toast ============ -->
+<div class="toast" id="toast" hidden></div>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

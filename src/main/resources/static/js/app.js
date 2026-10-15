@@ -1,0 +1,706 @@
+/**
+ * Roster front-end application logic.
+ * Vanilla JS, no build step — keeps the learning project approachable.
+ */
+
+const state = {
+  view: 'employees',
+  page: 0,
+  size: 10,
+  sortBy: 'id',
+  direction: 'asc',
+  keyword: '',
+  departmentId: '',
+  status: '',
+  departments: [],
+  lastPageResult: null,
+};
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+// ---------------------------------------------------------------
+// Bootstrapping
+// ---------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  loadSettings();
+  initThreeJsBackground();
+  bindNav();
+  bindToolbar();
+  bindEmployeeModal();
+  bindDeptModal();
+  bindSettingsModal();
+  bindConfirmDialog();
+  loadDepartments().then(() => {
+    loadEmployees();
+  });
+});
+
+// ---------------------------------------------------------------
+// Three.js Background
+// ---------------------------------------------------------------
+function initThreeJsBackground() {
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas || typeof THREE === 'undefined') return;
+
+  const scene = new THREE.Scene();
+  // Using background color from CSS
+  
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.z = 30;
+  camera.position.y = 10;
+  
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // Create a wavy particle plane
+  const geometry = new THREE.PlaneGeometry(120, 80, 40, 30);
+  geometry.rotateX(-Math.PI / 2);
+  
+  // Read computed style to adjust particle color based on theme
+  const rootStyles = getComputedStyle(document.body);
+  const accentColor = rootStyles.getPropertyValue('--accent-green').trim() || '#38bdf8';
+  
+  const material = new THREE.PointsMaterial({
+    color: new THREE.Color(accentColor),
+    size: 0.15,
+    transparent: true,
+    opacity: 0.6
+  });
+  
+  const particles = new THREE.Points(geometry, material);
+  scene.add(particles);
+
+  // Store original positions for animation
+  const positions = geometry.attributes.position;
+  const originalPositions = new Float32Array(positions.array.length);
+  for (let i = 0; i < positions.array.length; i++) {
+    originalPositions[i] = positions.array[i];
+  }
+
+  let time = 0;
+
+  function animate() {
+    requestAnimationFrame(animate);
+    time += 0.01;
+    
+    // Wave animation
+    for (let i = 0; i < positions.count; i++) {
+      const ix = i % 41;
+      const iy = Math.floor(i / 41);
+      
+      const x = originalPositions[i * 3];
+      const z = originalPositions[i * 3 + 2];
+      
+      // Calculate y based on sine waves
+      const y = Math.sin(ix * 0.2 + time) * 1.5 + Math.cos(iy * 0.2 + time * 0.8) * 1.5;
+      
+      positions.setY(i, y);
+    }
+    
+    positions.needsUpdate = true;
+    particles.rotation.y = Math.sin(time * 0.2) * 0.1;
+
+    renderer.render(scene, camera);
+  }
+  
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+// ---------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------
+function bindNav() {
+  $$('.nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('.nav-item').forEach((b) => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+      const view = btn.dataset.view;
+      state.view = view;
+      
+      $('#view-employees').style.display = view === 'employees' ? 'block' : 'none';
+      $('#view-departments').style.display = view === 'departments' ? 'block' : 'none';
+      
+      // Toggle top-nav action buttons
+      $('#addBtn').style.display = view === 'employees' ? 'block' : 'none';
+      $('#addDeptBtn').style.display = view === 'departments' ? 'block' : 'none';
+      
+      if (view === 'departments') renderDepartmentCards();
+    });
+  });
+
+  $('#addBtn').addEventListener('click', () => openEmployeeModal());
+  $('#addDeptBtn').addEventListener('click', () => openDeptModal());
+}
+
+// ---------------------------------------------------------------
+// Toolbar: search + filters
+// ---------------------------------------------------------------
+function bindToolbar() {
+  let debounceTimer;
+  $('#searchInput').addEventListener('input', (e) => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      state.keyword = e.target.value.trim();
+      state.page = 0;
+      loadEmployees();
+    }, 300);
+  });
+
+  $('#filterDepartment').addEventListener('change', (e) => {
+    state.departmentId = e.target.value;
+    state.page = 0;
+    loadEmployees();
+  });
+
+  $('#filterStatus').addEventListener('change', (e) => {
+    state.status = e.target.value;
+    state.page = 0;
+    loadEmployees();
+  });
+
+  $('#clearFiltersBtn').addEventListener('click', () => {
+    state.keyword = '';
+    state.departmentId = '';
+    state.status = '';
+    $('#searchInput').value = '';
+    $('#filterDepartment').value = '';
+    $('#filterStatus').value = '';
+    state.page = 0;
+    loadEmployees();
+  });
+
+  $$('#employeeTable thead th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.sort;
+      if (state.sortBy === field) {
+        state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sortBy = field;
+        state.direction = 'asc';
+      }
+      loadEmployees();
+    });
+  });
+}
+
+// ---------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------
+async function loadDepartments() {
+  try {
+    state.departments = await DepartmentApi.list();
+    populateDepartmentSelects();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function populateDepartmentSelects() {
+  const filterSelect = $('#filterDepartment');
+  const formSelect = $('#department');
+  const currentFilter = filterSelect.value;
+  const currentForm = formSelect.value;
+
+  filterSelect.innerHTML = '<option value="">All departments</option>' +
+    state.departments.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+  formSelect.innerHTML = '<option value="">Unassigned</option>' +
+    state.departments.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+
+  filterSelect.value = currentFilter;
+  formSelect.value = currentForm;
+}
+
+async function loadEmployees() {
+  try {
+    const result = await EmployeeApi.search({
+      keyword: state.keyword,
+      departmentId: state.departmentId,
+      status: state.status,
+      page: state.page,
+      size: state.size,
+      sortBy: state.sortBy,
+      direction: state.direction,
+    });
+    state.lastPageResult = result;
+    renderEmployeeTable(result);
+    renderPagination(result);
+    
+    // If no filters are active, update dashboard stats
+    if (!state.keyword && !state.departmentId && !state.status && state.page === 0) {
+      updateDashboardStats(result);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function updateDashboardStats(result) {
+  const total = result.totalElements || 0;
+  
+  // We need to fetch all active employees to get accurate ratio,
+  // but for a quick overview we can approximate or just hit the API again.
+  // We'll hit the API lightly to get the total count of active employees.
+  EmployeeApi.search({ status: 'ACTIVE', size: 1 }).then(res => {
+    const activeCount = res.totalElements || 0;
+    
+    $('#statActive').textContent = activeCount;
+    $('#statTotalSub').textContent = `Total: ${total}`;
+    
+    // Update SVG progress ring
+    const circle = $('.progress-ring__circle');
+    const radius = circle.r.baseVal.value;
+    const circumference = radius * 2 * Math.PI;
+    
+    const percent = total > 0 ? (activeCount / total) * 100 : 0;
+    const offset = circumference - (percent / 100) * circumference;
+    
+    circle.style.strokeDasharray = `${circumference} ${circumference}`;
+    circle.style.strokeDashoffset = offset;
+  }).catch(() => {
+    $('#statActive').textContent = "-";
+  });
+}
+
+// ---------------------------------------------------------------
+// Rendering: employee table
+// ---------------------------------------------------------------
+function renderEmployeeTable(result) {
+  const tbody = $('#employeeTableBody');
+  const rows = result.content || [];
+
+  $('#emptyState').hidden = rows.length > 0;
+  $('#employeeTable').style.display = rows.length > 0 ? '' : 'none';
+
+  tbody.innerHTML = rows.map((emp) => `
+    <tr data-id="${emp.id}">
+      <td>
+        <div class="emp-name">${escapeHtml(emp.fullName)}</div>
+        <div class="emp-email hide-sm">${escapeHtml(emp.email)}</div>
+      </td>
+      <td>${escapeHtml(emp.jobTitle)}</td>
+      <td class="hide-sm">${escapeHtml(emp.departmentName || '—')}</td>
+      <td class="hide-sm">${escapeHtml(emp.email)}</td>
+      <td>${formatCurrency(emp.salary)}</td>
+      <td class="hide-sm">${formatDate(emp.hireDate)}</td>
+      <td>${statusBadge(emp.status)}</td>
+      <td class="col-actions">
+        <button class="btn-icon" title="Edit" data-action="edit" data-id="${emp.id}">&#9998;</button>
+        <button class="btn-icon" title="Delete" data-action="delete" data-id="${emp.id}">&#128465;</button>
+      </td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+    btn.addEventListener('click', () => openEmployeeModal(btn.dataset.id));
+  });
+  tbody.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+    btn.addEventListener('click', () => confirmDeleteEmployee(btn.dataset.id));
+  });
+}
+
+function renderPagination(result) {
+  const el = $('#pagination');
+  const totalPages = result.totalPages || 1;
+  const current = result.page || 0;
+
+  if (totalPages <= 1) {
+    el.innerHTML = '';
+    return;
+  }
+
+  let html = `<button ${current === 0 ? 'disabled' : ''} data-page="${current - 1}">&larr; Prev</button>`;
+
+  for (let i = 0; i < totalPages; i++) {
+    if (totalPages > 7 && Math.abs(i - current) > 2 && i !== 0 && i !== totalPages - 1) {
+      if (i === 1 || i === totalPages - 2) html += `<span>…</span>`;
+      continue;
+    }
+    html += `<button class="${i === current ? 'is-active' : ''}" data-page="${i}">${i + 1}</button>`;
+  }
+
+  html += `<button ${current === totalPages - 1 ? 'disabled' : ''} data-page="${current + 1}">Next &rarr;</button>`;
+  el.innerHTML = html;
+
+  el.querySelectorAll('button[data-page]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.page = parseInt(btn.dataset.page, 10);
+      loadEmployees();
+    });
+  });
+}
+
+function statusBadge(status) {
+  const map = {
+    ACTIVE: ['Active', 'badge-active'],
+    ON_LEAVE: ['On leave', 'badge-on_leave'],
+    TERMINATED: ['Terminated', 'badge-terminated'],
+  };
+  const [label, cls] = map[status] || [status, ''];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// ---------------------------------------------------------------
+// Rendering: department cards
+// ---------------------------------------------------------------
+function renderDepartmentCards() {
+  const grid = $('#deptGrid');
+  if (!state.departments.length) {
+    grid.innerHTML = `<div class="empty-state">No departments yet. Add one to get started.</div>`;
+    return;
+  }
+
+  grid.innerHTML = state.departments.map((d) => `
+    <div class="dept-card glass-card" data-id="${d.id}">
+      <h3>${escapeHtml(d.name)}</h3>
+      <p>${escapeHtml(d.description || 'No description provided.')}</p>
+      <div class="dept-card-footer">
+        <span class="dept-count">${d.employeeCount} employee${d.employeeCount === 1 ? '' : 's'}</span>
+        <div class="dept-actions">
+          <button class="btn-icon" title="Edit" data-action="edit-dept" data-id="${d.id}">&#9998;</button>
+          <button class="btn-icon" title="Delete" data-action="delete-dept" data-id="${d.id}">&#128465;</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  grid.querySelectorAll('[data-action="edit-dept"]').forEach((btn) => {
+    btn.addEventListener('click', () => openDeptModal(btn.dataset.id));
+  });
+  grid.querySelectorAll('[data-action="delete-dept"]').forEach((btn) => {
+    btn.addEventListener('click', () => confirmDeleteDepartment(btn.dataset.id));
+  });
+}
+
+// ---------------------------------------------------------------
+// Employee modal (add/edit)
+// ---------------------------------------------------------------
+function bindEmployeeModal() {
+  $('#closeEmployeeModal').addEventListener('click', closeEmployeeModal);
+  $('#cancelEmployeeBtn').addEventListener('click', closeEmployeeModal);
+  $('#employeeModalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'employeeModalOverlay') closeEmployeeModal();
+  });
+  $('#employeeForm').addEventListener('submit', onEmployeeFormSubmit);
+}
+
+function openEmployeeModal(id) {
+  clearFieldErrors('employeeForm');
+  const form = $('#employeeForm');
+  form.reset();
+  $('#employeeId').value = '';
+
+  if (id) {
+    const row = (state.lastPageResult?.content || []).find((e) => String(e.id) === String(id));
+    $('#employeeModalTitle').textContent = 'Edit Employee';
+    if (row) fillEmployeeForm(row);
+    $('#employeeId').value = id;
+  } else {
+    $('#employeeModalTitle').textContent = 'Add Employee';
+    $('#status').value = 'ACTIVE';
+  }
+
+  $('#employeeModalOverlay').hidden = false;
+}
+
+function fillEmployeeForm(emp) {
+  $('#firstName').value = emp.firstName || '';
+  $('#lastName').value = emp.lastName || '';
+  $('#email').value = emp.email || '';
+  $('#phone').value = emp.phone || '';
+  $('#jobTitle').value = emp.jobTitle || '';
+  $('#salary').value = emp.salary || '';
+  $('#hireDate').value = emp.hireDate || '';
+  $('#department').value = emp.departmentId || '';
+  $('#status').value = emp.status || 'ACTIVE';
+}
+
+function closeEmployeeModal() {
+  $('#employeeModalOverlay').hidden = true;
+}
+
+async function onEmployeeFormSubmit(e) {
+  e.preventDefault();
+  clearFieldErrors('employeeForm');
+
+  const payload = {
+    firstName: $('#firstName').value.trim(),
+    lastName: $('#lastName').value.trim(),
+    email: $('#email').value.trim(),
+    phone: $('#phone').value.trim(),
+    jobTitle: $('#jobTitle').value.trim(),
+    salary: parseFloat($('#salary').value),
+    hireDate: $('#hireDate').value,
+    departmentId: $('#department').value ? parseInt($('#department').value, 10) : null,
+    status: $('#status').value,
+  };
+
+  const id = $('#employeeId').value;
+  const saveBtn = $('#saveEmployeeBtn');
+  saveBtn.disabled = true;
+
+  try {
+    if (id) {
+      await EmployeeApi.update(id, payload);
+      showToast('Employee updated', 'success');
+    } else {
+      await EmployeeApi.create(payload);
+      showToast('Employee added', 'success');
+    }
+    closeEmployeeModal();
+    await loadDepartments();
+    await loadEmployees();
+  } catch (err) {
+    if (err.fieldErrors) applyFieldErrors('employeeForm', err.fieldErrors);
+    else showToast(err.message, 'error');
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+function confirmDeleteEmployee(id) {
+  showConfirm('Delete this employee? This cannot be undone.', async () => {
+    try {
+      await EmployeeApi.remove(id);
+      showToast('Employee deleted', 'success');
+      // Reload stats implicitly because loadEmployees calls updateDashboardStats
+      await loadEmployees();
+      await loadDepartments();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+}
+
+// ---------------------------------------------------------------
+// Department modal (add/edit)
+// ---------------------------------------------------------------
+function bindDeptModal() {
+  $('#closeDeptModal').addEventListener('click', closeDeptModal);
+  $('#cancelDeptBtn').addEventListener('click', closeDeptModal);
+  $('#deptModalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'deptModalOverlay') closeDeptModal();
+  });
+  $('#deptForm').addEventListener('submit', onDeptFormSubmit);
+}
+
+function openDeptModal(id) {
+  clearFieldErrors('deptForm');
+  $('#deptForm').reset();
+  $('#deptId').value = '';
+
+  if (id) {
+    const dept = state.departments.find((d) => String(d.id) === String(id));
+    $('#deptModalTitle').textContent = 'Edit Department';
+    if (dept) {
+      $('#deptName').value = dept.name;
+      $('#deptDescription').value = dept.description || '';
+      $('#deptId').value = id;
+    }
+  } else {
+    $('#deptModalTitle').textContent = 'Add Department';
+  }
+
+  $('#deptModalOverlay').hidden = false;
+}
+
+function closeDeptModal() {
+  $('#deptModalOverlay').hidden = true;
+}
+
+async function onDeptFormSubmit(e) {
+  e.preventDefault();
+  clearFieldErrors('deptForm');
+
+  const payload = {
+    name: $('#deptName').value.trim(),
+    description: $('#deptDescription').value.trim(),
+  };
+  const id = $('#deptId').value;
+
+  try {
+    if (id) {
+      await DepartmentApi.update(id, payload);
+      showToast('Department updated', 'success');
+    } else {
+      await DepartmentApi.create(payload);
+      showToast('Department added', 'success');
+    }
+    closeDeptModal();
+    await loadDepartments();
+    renderDepartmentCards();
+  } catch (err) {
+    if (err.fieldErrors) applyFieldErrors('deptForm', err.fieldErrors);
+    else showToast(err.message, 'error');
+  }
+}
+
+function confirmDeleteDepartment(id) {
+  showConfirm('Delete this department? Employees must be reassigned first.', async () => {
+    try {
+      await DepartmentApi.remove(id);
+      showToast('Department deleted', 'success');
+      await loadDepartments();
+      renderDepartmentCards();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+}
+
+// ---------------------------------------------------------------
+// Confirm dialog
+// ---------------------------------------------------------------
+let confirmCallback = null;
+
+function bindConfirmDialog() {
+  $('#confirmCancelBtn').addEventListener('click', () => {
+    $('#confirmOverlay').hidden = true;
+    confirmCallback = null;
+  });
+  $('#confirmOkBtn').addEventListener('click', () => {
+    $('#confirmOverlay').hidden = true;
+    if (confirmCallback) confirmCallback();
+    confirmCallback = null;
+  });
+}
+
+function showConfirm(message, onConfirm) {
+  $('#confirmMessage').textContent = message;
+  confirmCallback = onConfirm;
+  $('#confirmOverlay').hidden = false;
+}
+
+// ---------------------------------------------------------------
+// Settings Modal & Logic
+// ---------------------------------------------------------------
+function bindSettingsModal() {
+  $('#userProfileBtn').addEventListener('click', openSettingsModal);
+  $('#closeSettingsModal').addEventListener('click', closeSettingsModal);
+  $('#cancelSettingsBtn').addEventListener('click', closeSettingsModal);
+  $('#settingsModalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'settingsModalOverlay') closeSettingsModal();
+  });
+  $('#settingsForm').addEventListener('submit', onSettingsFormSubmit);
+}
+
+function openSettingsModal() {
+  const currentSettings = getSettings();
+  $('#settingCompanyName').value = currentSettings.companyName;
+  $('#settingLogoUrl').value = currentSettings.logoUrl;
+  $('#settingTheme').value = currentSettings.theme;
+  $('#settingsModalOverlay').hidden = false;
+}
+
+function closeSettingsModal() {
+  $('#settingsModalOverlay').hidden = true;
+}
+
+function onSettingsFormSubmit(e) {
+  e.preventDefault();
+  const settings = {
+    companyName: $('#settingCompanyName').value.trim() || 'NexGen',
+    logoUrl: $('#settingLogoUrl').value.trim(),
+    theme: $('#settingTheme').value
+  };
+  localStorage.setItem('roster_settings', JSON.stringify(settings));
+  applySettings(settings);
+  closeSettingsModal();
+  showToast('Settings saved! Reloading for theme changes...', 'success');
+  
+  // Reload slightly after to re-initialize Three.js properly with new theme colors
+  setTimeout(() => window.location.reload(), 800);
+}
+
+function getSettings() {
+  const defaultSettings = { companyName: 'NexGen', logoUrl: '', theme: 'default' };
+  try {
+    const stored = localStorage.getItem('roster_settings');
+    const settings = stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
+    if (!['default', 'dark'].includes(settings.theme)) {
+      settings.theme = 'default';
+    }
+    return settings;
+  } catch (e) {
+    return defaultSettings;
+  }
+}
+
+function loadSettings() {
+  applySettings(getSettings());
+}
+
+function applySettings(settings) {
+  // Apply Company Name
+  document.querySelector('.brand-name').textContent = settings.companyName;
+  
+  // Apply Logo if set
+  if (settings.logoUrl) {
+    document.querySelector('.image-card').style.background = `#ffffff url('${settings.logoUrl}') center/contain no-repeat`;
+  } else {
+    document.querySelector('.image-card').style.background = ''; // revert to css default
+  }
+  
+  // Apply Theme
+  document.body.className = '';
+  if (settings.theme !== 'default') {
+    document.body.classList.add(`theme-${settings.theme}`);
+  }
+}
+
+// ---------------------------------------------------------------
+// Form error helpers
+// ---------------------------------------------------------------
+function clearFieldErrors(formId) {
+  $(`#${formId}`).querySelectorAll('.field-error').forEach((el) => (el.textContent = ''));
+}
+
+function applyFieldErrors(formId, fieldErrors) {
+  Object.entries(fieldErrors).forEach(([field, message]) => {
+    const el = document.getElementById(`err-${field}`);
+    if (el) el.textContent = message;
+  });
+}
+
+// ---------------------------------------------------------------
+// Toast notifications
+// ---------------------------------------------------------------
+let toastTimer;
+function showToast(message, type = 'info') {
+  const toast = $('#toast');
+  toast.textContent = message;
+  toast.className = 'toast' + (type === 'error' ? ' is-error' : type === 'success' ? ' is-success' : '');
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toast.hidden = true), 3500);
+}
+
+// ---------------------------------------------------------------
+// Formatting helpers
+// ---------------------------------------------------------------
+function formatCurrency(value) {
+  if (value === null || value === undefined) return '—';
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
+}
+
+function formatDate(isoDate) {
+  if (!isoDate) return '—';
+  const d = new Date(isoDate + 'T00:00:00');
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
